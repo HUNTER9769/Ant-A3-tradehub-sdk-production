@@ -131,6 +131,7 @@ class TradeHub:
         self._wss_url = ServiceProps.WSS_URL
         self.websocket_url = 'wss://ws1.aliceblueonline.com/NorenWS/'
 
+
         # URL Mappings
         self._endpoints = {
             # API User Authorization Part
@@ -184,7 +185,11 @@ class TradeHub:
     """API Methods Declaration Part"""
 
     def _init_session(self):
-        return RequestHandler(session_token=self.sessionAuthorization())
+        return RequestHandler(
+            session_token=self.sessionAuthorization(),
+            proxy_url=getattr(self, "proxy_url", None),
+            static_ip=getattr(self, "static_ip", None)
+        )
 
     def _init_get(self, _endpoints_key, data=None, params=None, pathParameter=None, wss_url=None):
         """Send a GET request to the specified endpoint key with optional path parameter."""

@@ -2,7 +2,7 @@ from utility.library import *
 
 
 class RequestHandler:
-    def __init__(self, session_token: str):
+    def __init__(self, session_token: str, proxy_url: str = None, static_ip: str = None):
         """
         Initializes the request handler with a session token.
 
@@ -12,6 +12,17 @@ class RequestHandler:
         self.headers = {
             "Authorization": session_token
         }
+
+        # proxy settings
+        self.proxy_url = proxy_url
+        self.static_ip = static_ip
+
+        self.enable_logs = True
+
+    def _log(self, stage, data=None):
+        if not self.enable_logs:
+            return
+        print(f"[RH:{stage}]", data if data else "")
 
     def request(self, url: str, method: str, data=None, params=None) -> dict:
         """
@@ -27,7 +38,10 @@ class RequestHandler:
             dict: Parsed JSON response or error structure.
         """
         try:
+            self._log("ENTER", {"method": method, "url": url})
+
             method = method.upper()
+
             kwargs = {
                 "headers": self.headers,
             }
@@ -37,6 +51,60 @@ class RequestHandler:
 
             if data is not None:
                 kwargs["json"] = data
+
+            self._log("PROXY_REQUEST", {
+                "proxy": self.proxy_url,
+                "ip": self.static_ip
+            })
+            # =========================
+            # PROXY FLOW
+            # =========================
+            if self.proxy_url:
+
+                proxy_payload = {
+                    "method": method,
+                    "url": url,
+                    "source_ip": self.static_ip,
+                    "headers": self.headers,
+                    "params": params if isinstance(params, dict) else {},
+                    "json": data,
+                    "timeout": 20,
+                    "allow_redirects": True,
+                    "verify_ssl": True
+                }
+
+                response = requests.post(
+                    self.proxy_url,
+                    json=proxy_payload,
+                    timeout=25
+                )
+
+                self._log("PROXY_RESPONSE_RAW", {
+                    "status": response.status_code,
+                    "text": response.text[:300]
+                })
+
+                if response.status_code != 200:
+                    return {
+                        'stat': 'Not_ok',
+                        'emsg': response.text,
+                        'encKey': None
+                    }
+
+                result = response.json()
+
+                self._log("PROXY_RESPONSE", result)
+
+                return result.get("json") or {
+                    'stat': 'Not_ok',
+                    'emsg': result.get("text"),
+                    'encKey': None
+                }
+
+            # =========================
+            # DIRECT FLOW
+            # =========================
+            self._log("DIRECT_REQUEST")
 
             if method == "POST":
                 response = requests.post(url, timeout=20, **kwargs)
@@ -49,28 +117,31 @@ class RequestHandler:
             else:
                 raise ValueError(f"Unsupported request type: {method}")
 
+            self._log("DIRECT_RESPONSE", {
+                "status": response.status_code,
+                "text": response.text[:300]
+            })
+
             return self._handle_response(response)
 
-        except (requests.ConnectionError, requests.Timeout) as conn_exc:
-            return {
-                'stat': 'Not_ok',
-                'emsg': str(conn_exc),
-                'encKey': None
-            }
+        # =========================
+        # ERRORS
+        # =========================
+        except requests.ConnectionError as e:
+            self._log("CONNECTION_ERROR", str(e))
+            return {'stat': 'Not_ok', 'emsg': str(e), 'encKey': None}
 
-        except ValueError as ve:
-            return {
-                'stat': 'Not_ok',
-                'emsg': f"Error: {str(ve)}",
-                'encKey': None
-            }
+        except requests.Timeout as e:
+            self._log("TIMEOUT", str(e))
+            return {'stat': 'Not_ok', 'emsg': str(e), 'encKey': None}
+
+        except ValueError as e:
+            self._log("VALUE_ERROR", str(e))
+            return {'stat': 'Not_ok', 'emsg': str(e), 'encKey': None}
 
         except Exception as e:
-            return {
-                'stat': 'Not_ok',
-                'emsg': f"Unexpected Error: {str(e)}",
-                'encKey': None
-            }
+            self._log("EXCEPTION", str(e))
+            return {'stat': 'Not_ok', 'emsg': str(e), 'encKey': None}
 
     def _handle_response(self, response: requests.Response) -> dict:
         """
